@@ -1,0 +1,10 @@
+Package: sooperlooper
+Version: 1.7.9
+Section: sound
+Priority: optional
+Architecture: all
+Essential: no
+Installed-Size: 1024
+Maintainer: Daryl Hanlon <darylo1@hotmail.com>
+Description: SooperLooper is a live looping sampler capable of immediate loop
+ recording, overdubbing, multiplying, reversing and more.
