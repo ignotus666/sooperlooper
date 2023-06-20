@@ -92,7 +92,8 @@ enum {
 	ID_MuteQuantCheck,
 	ID_OdubQuantCheck,
 	ID_SmartEighthCheck,
-	ID_ReplQuantCheck
+	ID_ReplQuantCheck,
+	ID_GlobalCyclePos
 };
 
 
@@ -201,7 +202,7 @@ MainPanel::~MainPanel()
 void
 MainPanel::init()
 {
-	_main_sizer = new wxBoxSizer(wxVERTICAL);
+	_scroller_sizer = new wxBoxSizer(wxVERTICAL);
 	_topsizer = new wxBoxSizer(wxVERTICAL);
 
 	//wxBoxSizer * rowsizer = new wxBoxSizer(wxHORIZONTAL);
@@ -294,7 +295,6 @@ MainPanel::init()
 	_repl_quant_check->bind_request.connect (sigc::bind(mem_fun (*this, &MainPanel::on_bind_request), wxT("replace_quantized")));
 	rowsizer->Add (_repl_quant_check, 0, wxALL|wxEXPAND, 2);
 
-
 	rowsizer->Add (1, 1, 1);
 
 	wxStaticBitmap * logobit = new wxStaticBitmap(_top_panel, -1, wxBitmap(sl_logo_xpm));
@@ -375,13 +375,11 @@ MainPanel::init()
 
 	
 	_top_panel->SetSizer( topcolsizer );      // actually set the sizer
-	topcolsizer->Fit( _top_panel );            // set size to minimum size as calculated by the sizer
-	topcolsizer->SetSizeHints( _top_panel );   // set size hints to honour mininum size
 
 	_topsizer->Add (_top_panel, 0, wxEXPAND);
 
 	
-	_scroller = new wxScrolledWindow(this, -1, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+	_scroller = new wxScrolledWindow(this, -1, wxDefaultPosition, wxSize(846, 118), wxVSCROLL); // initial size should fit one loop
 	_scroller->SetBackgroundColour(*wxBLACK);
 	
 
@@ -394,20 +392,12 @@ MainPanel::init()
 
 	_topsizer->Add (_scroller, 1, wxEXPAND);
 	
-	_scroller->SetSizer( _main_sizer );      // actually set the sizer
-	_scroller->SetAutoLayout( true );     // tell dialog to use sizer
+	_scroller->SetSizer( _scroller_sizer );      // actually set the sizer
 
 	_scroller->SetScrollRate (0, 30);
 	_scroller->EnableScrolling (true, true);
-
-	//_main_sizer->Fit( _scroller );            // set size to minimum size as calculated by the sizer
-	_main_sizer->SetSizeHints( _scroller );   // set size hints to honour mininum size
-
 	
-	this->SetAutoLayout( true );     // tell dialog to use sizer
 	this->SetSizer( _topsizer );      // actually set the sizer
-	_topsizer->Fit( this );            // set size to minimum size as calculated by the sizer
-	_topsizer->SetSizeHints( this );   // set size hints to honour mininum size
 
 	_scroller->SetFocus();
 }
@@ -448,7 +438,7 @@ MainPanel::init_loopers (int count)
 		while (count > (int) _looper_panels.size()) {
 			looperpan = new LooperPanel(this, _loop_control, _scroller, -1);
 			looperpan->set_index(_looper_panels.size());
-			_main_sizer->Add (looperpan, 0, wxEXPAND|wxALL, 0);
+			_scroller_sizer->Add (looperpan, 0, wxEXPAND|wxALL, 0);
 			_looper_panels.push_back (looperpan);
 		}
 	}
@@ -456,40 +446,21 @@ MainPanel::init_loopers (int count)
 		while (count < (int)_looper_panels.size()) {
 			looperpan = _looper_panels.back();
 			_looper_panels.pop_back();
-			_main_sizer->Remove((wxBoxSizer*)looperpan);
+			_scroller_sizer->Remove((wxBoxSizer*)looperpan);
 			looperpan->Destroy();
 		}
 	}
 
-	_scroller->SetClientSize(_scroller->GetClientSize());
 	_scroller->Layout();
-	_scroller->SetScrollRate(0,30);
+	_scroller->FitInside();
 
- 	if (!_looper_panels.empty()) {
- 		wxSize bestsz = _looper_panels[0]->GetBestSize();
-		//cerr << "best w: " << bestsz.GetWidth() << endl;
- 		_scroller->SetMinClientSize (bestsz);
-		_topsizer->Layout();
-// 		_topsizer->Fit(this);
-// 		_topsizer->SetSizeHints(this);
-
-		
-		// maybe resize
-		if (_looper_panels.size() <= 4) {
-			int topheight = _top_panel->GetSize().GetHeight();
-
-			//SetSize(GetSize().GetWidth(), bestsz.GetHeight() * _looper_panels.size()  + topheight); 
-			PreferredSizeChange(GetSize().GetWidth(), bestsz.GetHeight() * _looper_panels.size()  + topheight); // emit
-		}
-		
-		
+	// maybe resize topwindow, keeping width the same, but resize height to be just big enough to hold the updated number of looper panels
+	if (_looper_panels.size() > 0 && _looper_panels.size() <= 4) {
+		wxTopLevelWindow *topwindow = wxStaticCast(wxGetTopLevelParent(this), wxTopLevelWindow);
+		if (topwindow && topwindow->IsIconized() == false) // don't trigger refit if minimized
+			topwindow->SetClientSize(GetSize().GetWidth(), _top_panel->GetSize().GetHeight() + _scroller_sizer->GetMinSize().GetHeight());
  	}
-	
 
-	//_main_sizer->Layout();
-	//_main_sizer->Fit(_scroller);
-	//_main_sizer->SetSizeHints( _scroller );   // set size hints to honour mininum size
-	
 	// request all values for initial state
 	_loop_control->register_all_in_new_thread(_looper_panels.size());
 
@@ -740,6 +711,18 @@ MainPanel::update_controls()
 		_loop_control->get_global_value(wxT("selected_loop_num"), val);
 		set_curr_loop ((int) val);
 	}
+
+	if (_loop_control->is_global_updated(wxT("global_cycle_pos"))) {
+		float gclen, gcpos;
+		_loop_control->get_global_value(wxT("global_cycle_len"), gclen);
+		_loop_control->get_global_value(wxT("global_cycle_pos"), gcpos);
+		val = 0.0f;
+		// only display global cycle len if it is >= 1s to reduce visual noise
+		if(gclen >= 1.0f)
+			val = gcpos / gclen;
+		_quantize_choice->set_bar_value(val);
+	}
+
 }
 
 void
